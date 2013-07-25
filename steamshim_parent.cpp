@@ -258,7 +258,6 @@ typedef enum ShimCmd
 typedef enum ShimEvent
 {
     SHIMEVENT_BYE,
-    SHIMEVENT_PUMPED,
     SHIMEVENT_STATSRECEIVED,
     SHIMEVENT_STATSSTORED,
     SHIMEVENT_SETACHIEVEMENT,
@@ -294,12 +293,6 @@ static inline bool writeBye(PipeType fd)
     dbgpipe("Parent sending SHIMEVENT_BYE().\n");
     return write1ByteCmd(fd, SHIMEVENT_BYE);
 } // writeBye
-
-static inline bool writePumped(PipeType fd)
-{
-    dbgpipe("Parent sending SHIMEVENT_PUMPED().\n");
-    return write1ByteCmd(fd, SHIMEVENT_PUMPED);
-} // writePumped
 
 static inline bool writeStatsReceived(PipeType fd, const bool okay)
 {
@@ -439,7 +432,6 @@ static bool processCommand(const uint8 *buf, unsigned int buflen, PipeType fd)
     {
         case SHIMCMD_PUMP:
             SteamAPI_RunCallbacks();
-            writePumped(fd);
             break;
 
         case SHIMCMD_BYE:

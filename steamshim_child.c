@@ -237,7 +237,6 @@ static const STEAMSHIM_Event *processEvent(const uint8 *buf, size_t buflen)
     if (0) {}
     #define PRINTGOTEVENT(x) else if (type == x) printf("Child got " #x ".\n")
     PRINTGOTEVENT(SHIMEVENT_BYE);
-    PRINTGOTEVENT(SHIMEVENT_PUMPED);
     PRINTGOTEVENT(SHIMEVENT_STATSRECEIVED);
     PRINTGOTEVENT(SHIMEVENT_STATSSTORED);
     PRINTGOTEVENT(SHIMEVENT_SETACHIEVEMENT);
@@ -254,7 +253,6 @@ static const STEAMSHIM_Event *processEvent(const uint8 *buf, size_t buflen)
     switch (type)
     {
         case SHIMEVENT_BYE:
-        case SHIMEVENT_PUMPED:
             break;
 
         case SHIMEVENT_STATSRECEIVED:

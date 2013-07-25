@@ -13,7 +13,6 @@ static void printEvent(const STEAMSHIM_Event *e)
     {
         #define PRINTGOTEVENT(x) case SHIMEVENT_##x: printf("%s(", #x); break
         PRINTGOTEVENT(BYE);
-        PRINTGOTEVENT(PUMPED);
         PRINTGOTEVENT(STATSRECEIVED);
         PRINTGOTEVENT(STATSSTORED);
         PRINTGOTEVENT(SETACHIEVEMENT);
