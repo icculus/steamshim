@@ -13,7 +13,6 @@ typedef HANDLE PipeType;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
@@ -448,7 +447,7 @@ static bool processCommand(const uint8 *buf, unsigned int buflen, PipeType fd)
                 if ((GSteamStats) && (GSteamStats->GetAchievementAndUnlockTime(name, &ach, &t)))
                     writeAchievementGet(fd, name, ach ? 1 : 0, t);
 	            else
-                    writeAchievementGet(fd, name, -1, 0);
+                    writeAchievementGet(fd, name, 2, 0);
             } // if
             break;
 
@@ -529,11 +528,12 @@ static void processCommands(PipeType pipeParentRead, PipeType pipeParentWrite)
                 } // if
 
                 br -= cmdlen + 1;
-                memmove(buf, buf+cmdlen+1, br);
+                if (br > 0)
+                    memmove(buf, buf+cmdlen+1, br);
             } // if
-            else  // get rest of this partial command.
+            else  // get more data.
             {
-                const int morebr = readPipe(pipeParentRead, buf+br, cmdlen-(br-1));
+                const int morebr = readPipe(pipeParentRead, buf+br, sizeof (buf) - br));
                 if (morebr <= 0)
                 {
                     quit = true;  // uhoh.
@@ -612,6 +612,7 @@ static int mainline(void)
     processCommands(pipeParentRead, pipeParentWrite);
 
     // Close our ends of the pipes.
+    writeBye(pipeParentWrite);
     closePipe(pipeParentRead);
     closePipe(pipeParentWrite);
 
@@ -621,5 +622,5 @@ static int mainline(void)
     return closeProcess(&childPid);
 } // mainline
 
-// end of steamshim.cpp ...
+// end of steamshim_parent.cpp ...
 
