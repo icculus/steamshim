@@ -25,6 +25,13 @@ typedef int PipeType;
 
 #include "steamshim_child.h"
 
+#define DEBUGPIPE 1
+#if DEBUGPIPE
+#define dbgpipe printf
+#else
+static inline void dbgpipe(const char *fmt, ...) {}
+#endif
+
 static int writePipe(PipeType fd, const void *buf, const unsigned int _len);
 static int readPipe(PipeType fd, void *buf, const unsigned int _len);
 static void closePipe(PipeType fd);
@@ -101,7 +108,7 @@ static void closePipe(PipeType fd)
 static char *getEnvVar(const char *key, char *buf, const size_t buflen)
 {
     const char *envr = getenv(key);
-    if (!key || (strlen(envr) >= buflen))
+    if (!envr || (strlen(envr) >= buflen))
         return NULL;
     strcpy(buf, envr);
     return buf;
@@ -142,13 +149,14 @@ static int write2ByteCmd(const uint8 b1, const uint8 b2)
 
 static inline int writeBye(void)
 {
+    dbgpipe("Child sending SHIMCMD_BYE().\n");
     return write1ByteCmd(SHIMCMD_BYE);
 } // writeBye
 
 static int initPipes(void)
 {
     char buf[64];
-    long long unsigned val;
+    unsigned long long val;
 
     if (!getEnvVar("STEAMSHIM_READHANDLE", buf, sizeof (buf)))
         return 0;
@@ -170,16 +178,22 @@ static int initPipes(void)
 
 int STEAMSHIM_init(void)
 {
+    dbgpipe("Child init start.\n");
     if (!initPipes())
+    {
+        dbgpipe("Child init failed.\n");
         return 0;
+    } /* if */
 
     signal(SIGPIPE, SIG_IGN);
 
+    dbgpipe("Child init success!\n");
     return 1;
 } /* STEAMSHIM_init */
 
 void STEAMSHIM_deinit(void)
 {
+    dbgpipe("Child deinit.\n");
     if (GPipeWrite != NULLPIPE)
     {
         writeBye();
@@ -218,6 +232,24 @@ static const STEAMSHIM_Event *processEvent(const uint8 *buf, size_t buflen)
     memset(&event, '\0', sizeof (event));
     event.type = type;
     event.okay = 1;
+
+    #if DEBUGPIPE
+    if (0) {}
+    #define PRINTGOTEVENT(x) else if (type == x) printf("Child got " #x ".\n")
+    PRINTGOTEVENT(SHIMEVENT_BYE);
+    PRINTGOTEVENT(SHIMEVENT_PUMPED);
+    PRINTGOTEVENT(SHIMEVENT_STATSRECEIVED);
+    PRINTGOTEVENT(SHIMEVENT_STATSSTORED);
+    PRINTGOTEVENT(SHIMEVENT_SETACHIEVEMENT);
+    PRINTGOTEVENT(SHIMEVENT_GETACHIEVEMENT);
+    PRINTGOTEVENT(SHIMEVENT_RESETSTATS);
+    PRINTGOTEVENT(SHIMEVENT_SETSTATI);
+    PRINTGOTEVENT(SHIMEVENT_GETSTATI);
+    PRINTGOTEVENT(SHIMEVENT_SETSTATF);
+    PRINTGOTEVENT(SHIMEVENT_GETSTATF);
+    #undef PRINTGOTEVENT
+    else printf("Child got unknown shimevent %d.\n", (int) type);
+    #endif
 
     switch (type)
     {
@@ -291,10 +323,13 @@ const STEAMSHIM_Event *STEAMSHIM_pump(void)
         if (pipeReady(GPipeRead))
         {
             const int morebr = readPipe(GPipeRead, buf + br, sizeof (buf) - br);
-            if (morebr <= 0)  /* uh oh */
-                STEAMSHIM_deinit();   /* kill it all. */
-            else
+            if (morebr > 0)
                 br += morebr;
+            else  /* uh oh */
+            {
+                dbgpipe("Child readPipe failed! Shutting down.\n");
+                STEAMSHIM_deinit();   /* kill it all. */
+            } /* else */
         } /* if */
     } /* if */
 
@@ -309,7 +344,10 @@ const STEAMSHIM_Event *STEAMSHIM_pump(void)
 
     /* Run Steam event loop. */
     if (br == 0)
+    {
+        dbgpipe("Child sending SHIMCMD_PUMP().\n");
         write1ByteCmd(SHIMCMD_PUMP);
+    } /* if */
 
     return NULL;
 } /* STEAMSHIM_pump */
@@ -317,12 +355,14 @@ const STEAMSHIM_Event *STEAMSHIM_pump(void)
 void STEAMSHIM_requestStats(void)
 {
     if (isDead()) return;
+    dbgpipe("Child sending SHIMCMD_REQUESTSTATS().\n");
     write1ByteCmd(SHIMCMD_REQUESTSTATS);
 } /* STEAMSHIM_requestStats */
 
 void STEAMSHIM_storeStats(void)
 {
     if (isDead()) return;
+    dbgpipe("Child sending SHIMCMD_STORESTATS().\n");
     write1ByteCmd(SHIMCMD_STORESTATS);
 } /* STEAMSHIM_storeStats */
 
@@ -331,6 +371,7 @@ void STEAMSHIM_setAchievement(const char *name, const int enable)
     uint8 buf[256];
     uint8 *ptr = buf+1;
     if (isDead()) return;
+    dbgpipe("Child sending SHIMCMD_SETACHIEVEMENT('%s', %senable).\n", name, enable ? "" : "!");
     *(ptr++) = (uint8) SHIMCMD_SETACHIEVEMENT;
     *(ptr++) = enable ? 1 : 0;
     strcpy((char *) ptr, name);
@@ -344,6 +385,7 @@ void STEAMSHIM_getAchievement(const char *name)
     uint8 buf[256];
     uint8 *ptr = buf+1;
     if (isDead()) return;
+    dbgpipe("Child sending SHIMCMD_GETACHIEVEMENT('%s').\n", name);
     *(ptr++) = (uint8) SHIMCMD_GETACHIEVEMENT;
     strcpy((char *) ptr, name);
     ptr += strlen(name) + 1;
@@ -354,6 +396,7 @@ void STEAMSHIM_getAchievement(const char *name)
 void STEAMSHIM_resetStats(const int bAlsoAchievements)
 {
     if (isDead()) return;
+    dbgpipe("Child sending SHIMCMD_RESETSTATS(%salsoAchievements).\n", bAlsoAchievements ? "" : "!");
     write2ByteCmd(SHIMCMD_RESETSTATS, bAlsoAchievements ? 1 : 0);
 } /* STEAMSHIM_resetStats */
 
@@ -377,21 +420,25 @@ static void writeStatThing(const ShimCmd cmd, const char *name, const void *val,
 void STEAMSHIM_setStatI(const char *name, const int _val)
 {
     const int32 val = (int32) _val;
+    dbgpipe("Child sending SHIMCMD_SETSTATI('%s', val %d).\n", name, val);
     writeStatThing(SHIMCMD_SETSTATI, name, &val, sizeof (val));
 } /* STEAMSHIM_setStatI */
 
 void STEAMSHIM_getStatI(const char *name)
 {
+    dbgpipe("Child sending SHIMCMD_GETSTATI('%s').\n", name);
     writeStatThing(SHIMCMD_GETSTATI, name, NULL, 0);
 } /* STEAMSHIM_getStatI */
 
 void STEAMSHIM_setStatF(const char *name, const float val)
 {
+    dbgpipe("Child sending SHIMCMD_SETSTATF('%s', val %f).\n", name, val);
     writeStatThing(SHIMCMD_SETSTATF, name, &val, sizeof (val));
 } /* STEAMSHIM_setStatF */
 
 void STEAMSHIM_getStatF(const char *name)
 {
+    dbgpipe("Child sending SHIMCMD_GETSTATF('%s').\n", name);
     writeStatThing(SHIMCMD_GETSTATF, name, NULL, 0);
 } /* STEAMSHIM_getStatF */
 
