@@ -13,6 +13,7 @@ typedef HANDLE PipeType;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
@@ -214,42 +215,334 @@ int main(int argc, char **argv)
 
 // THE ACTUAL PROGRAM.
 
-static ISteamUserStats *GStats = NULL;
-static bool GStatsAvailable = false;
+class SteamBridge;
 
-typedef enum ShimCmds
+static ISteamUserStats *GSteamStats = NULL;
+static ISteamUtils *GSteamUtils = NULL;
+static ISteamUser *GSteamUser = NULL;
+static AppId_t GAppID = 0;
+static uint64 GUserID = 0;
+static SteamBridge *GSteamBridge = NULL;
+
+class SteamBridge
 {
+public:
+    SteamBridge(PipeType _fd);
+	STEAM_CALLBACK(SteamBridge, OnUserStatsReceived, UserStatsReceived_t, m_CallbackUserStatsReceived);
+	STEAM_CALLBACK(SteamBridge, OnUserStatsStored, UserStatsStored_t, m_CallbackUserStatsStored);
+
+private:
+    PipeType fd;
+};
+
+typedef enum ShimCmd
+{
+    SHIMCMD_BYE,
+    SHIMCMD_PUMP,
+    SHIMCMD_REQUESTSTATS,
+    SHIMCMD_STORESTATS,
     SHIMCMD_SETACHIEVEMENT,
     SHIMCMD_GETACHIEVEMENT,
-    SHIMCMD_SETSTAT,
-    SHIMCMD_GETSTAT,
-} ShimCmds;
+    SHIMCMD_RESETSTATS,
+    SHIMCMD_SETSTATI,
+    SHIMCMD_GETSTATI,
+    SHIMCMD_SETSTATF,
+    SHIMCMD_GETSTATF,
+} ShimCmd;
 
-static void processCommand(char *buf, const unsigned int buflen, PipeType fd)
+typedef enum ShimEvent
 {
-    int cmd;
+    SHIMEVENT_BYE,
+    SHIMEVENT_PUMPED,
+    SHIMEVENT_STATSRECEIVED,
+    SHIMEVENT_STATSSTORED,
+    SHIMEVENT_SETACHIEVEMENT,
+    SHIMEVENT_GETACHIEVEMENT,
+    SHIMEVENT_RESETSTATS,
+    SHIMEVENT_SETSTATI,
+    SHIMEVENT_GETSTATI,
+    SHIMEVENT_SETSTATF,
+    SHIMEVENT_GETSTATF,
+} ShimEvent;
 
+static bool write1ByteCmd(PipeType fd, const uint8 b1)
+{
+    const uint8 buf[] = { 1, b1 };
+    return writePipe(fd, buf, sizeof (buf));
+} // write1ByteCmd
+
+static bool write2ByteCmd(PipeType fd, const uint8 b1, const uint8 b2)
+{
+    const uint8 buf[] = { 2, b1, b2 };
+    return writePipe(fd, buf, sizeof (buf));
+} // write2ByteCmd
+
+static bool write3ByteCmd(PipeType fd, const uint8 b1, const uint8 b2, const uint8 b3)
+{
+    const uint8 buf[] = { 3, b1, b2, b3 };
+    return writePipe(fd, buf, sizeof (buf));
+} // write3ByteCmd
+
+static inline bool writeBye(PipeType fd)
+{
+    return write1ByteCmd(fd, SHIMEVENT_BYE);
+} // writeBye
+
+static inline bool writePumped(PipeType fd)
+{
+    return write1ByteCmd(fd, SHIMEVENT_PUMPED);
+} // writePumped
+
+static inline bool writeStatsReceived(PipeType fd, const bool okay)
+{
+    return write2ByteCmd(fd, SHIMEVENT_STATSRECEIVED, okay ? 1 : 0);
+} // writeStatsReceived
+
+static inline bool writeStatsStored(PipeType fd, const bool okay)
+{
+    return write2ByteCmd(fd, SHIMEVENT_STATSSTORED, okay ? 1 : 0);
+} // writeStatsStored
+
+static bool writeAchievementSet(PipeType fd, const char *name, const bool enable, const bool okay)
+{
+    uint8 buf[256];
+    uint8 *ptr = buf+1;
+    *(ptr++) = (uint8) SHIMEVENT_SETACHIEVEMENT;
+    *(ptr++) = enable ? 1 : 0;
+    *(ptr++) = okay ? 1 : 0;
+    strcpy((char *) ptr, name);
+    ptr += strlen(name) + 1;
+    buf[0] = (uint8) ((ptr-1) - buf);
+    return writePipe(fd, buf, buf[0] + 1);
+} // writeAchievementSet
+
+static bool writeAchievementGet(PipeType fd, const char *name, const int status, const uint64 time)
+{
+    uint8 buf[256];
+    uint8 *ptr = buf+1;
+    *(ptr++) = (uint8) SHIMEVENT_GETACHIEVEMENT;
+    *(ptr++) = (uint8) status;
+    memcpy(ptr, &time, sizeof (time));
+    ptr += sizeof (time);
+    strcpy((char *) ptr, name);
+    ptr += strlen(name) + 1;
+    buf[0] = (uint8) ((ptr-1) - buf);
+    return writePipe(fd, buf, buf[0] + 1);
+} // writeAchievementGet
+
+static inline bool writeResetStats(PipeType fd, const bool alsoAch, const bool okay)
+{
+    return write3ByteCmd(fd, SHIMEVENT_RESETSTATS, alsoAch ? 1 : 0, okay ? 1 : 0);
+} // writeResetStats
+
+static bool writeStatThing(PipeType fd, const ShimEvent ev, const char *name, const void *val, const size_t vallen, const bool okay)
+{
+    uint8 buf[256];
+    uint8 *ptr = buf+1;
+    *(ptr++) = (uint8) ev;
+    *(ptr++) = okay ? 1 : 0;
+    memcpy(ptr, val, vallen);
+    ptr += vallen;
+    strcpy((char *) ptr, name);
+    ptr += strlen(name) + 1;
+    buf[0] = (uint8) ((ptr-1) - buf);
+    return writePipe(fd, buf, buf[0] + 1);
+} // writeStatThing
+
+static inline bool writeSetStatI(PipeType fd, const char *name, const int32 val, const bool okay)
+{
+    return writeStatThing(fd, SHIMEVENT_SETSTATI, name, &val, sizeof (val), okay);
+} // writeSetStatI
+
+static inline bool writeSetStatF(PipeType fd, const char *name, const float val, const bool okay)
+{
+    return writeStatThing(fd, SHIMEVENT_SETSTATF, name, &val, sizeof (val), okay);
+} // writeSetStatF
+
+static inline bool writeGetStatI(PipeType fd, const char *name, const int32 val, const bool okay)
+{
+    return writeStatThing(fd, SHIMEVENT_GETSTATI, name, &val, sizeof (val), okay);
+} // writeGetStatI
+
+static inline bool writeGetStatF(PipeType fd, const char *name, const float val, const bool okay)
+{
+    return writeStatThing(fd, SHIMEVENT_GETSTATF, name, &val, sizeof (val), okay);
+} // writeGetStatF
+
+
+
+SteamBridge::SteamBridge(PipeType _fd)
+    : m_CallbackUserStatsReceived( this, &SteamBridge::OnUserStatsReceived )
+	, m_CallbackUserStatsStored( this, &SteamBridge::OnUserStatsStored )
+	, fd(_fd)
+{
+} // SteamBridge::SteamBridge
+
+void SteamBridge::OnUserStatsReceived(UserStatsReceived_t *pCallback)
+{
+	if (GAppID != pCallback->m_nGameID) return;
+	if (GUserID != pCallback->m_steamIDUser.ConvertToUint64()) return;
+    writeStatsReceived(fd, pCallback->m_eResult == k_EResultOK);
+} // SteamBridge::OnUserStatsReceived
+
+void SteamBridge::OnUserStatsStored(UserStatsStored_t *pCallback)
+{
+	if (GAppID != pCallback->m_nGameID) return;
+    writeStatsStored(fd, pCallback->m_eResult == k_EResultOK);
+} // SteamBridge::OnUserStatsStored
+
+
+static bool processCommand(const uint8 *buf, unsigned int buflen, PipeType fd)
+{
     if (buflen == 0)
-        return;
+        return true;
 
-    cmd = (int) *(buf++);
+    const ShimCmd cmd = (ShimCmd) *(buf++);
+    buflen--;
+
     switch (cmd)
     {
-        case SHIMCMD_SETACHIEVEMENT: break;
-        case SHIMCMD_GETACHIEVEMENT: break;
-        case SHIMCMD_SETSTAT: break;
-        case SHIMCMD_GETSTAT: break;
+        case SHIMCMD_PUMP:
+            SteamAPI_RunCallbacks();
+            writePumped(fd);
+            break;
+
+        case SHIMCMD_BYE:
+            writeBye(fd);
+            return false;
+
+        case SHIMCMD_REQUESTSTATS:
+            if ((!GSteamStats) || (!GSteamStats->RequestCurrentStats()))
+                writeStatsReceived(fd, false);
+            // callback later.
+            break;
+
+        case SHIMCMD_STORESTATS:
+            if ((!GSteamStats) || (!GSteamStats->StoreStats()))
+                writeStatsStored(fd, false);
+            // callback later.
+            break;
+
+        case SHIMCMD_SETACHIEVEMENT:
+            if (buflen >= 2)
+            {
+                const bool enable = (*(buf++) != 0);
+                const char *name = (const char *) buf;   // !!! FIXME: buffer overflow possible.
+                if (!GSteamStats)
+                    writeAchievementSet(fd, name, enable, false);
+                else if (enable && !GSteamStats->SetAchievement(name))
+                    writeAchievementSet(fd, name, enable, false);
+                else if (!enable && !GSteamStats->ClearAchievement(name))
+                    writeAchievementSet(fd, name, enable, false);
+                else
+                    writeAchievementSet(fd, name, enable, true);
+            } // if
+            break;
+
+        case SHIMCMD_GETACHIEVEMENT:
+            if (buflen)
+            {
+                const char *name = (const char *) buf;   // !!! FIXME: buffer overflow possible.
+                bool ach = false;
+	            uint32 t = 0;
+                if ((GSteamStats) && (GSteamStats->GetAchievementAndUnlockTime(name, &ach, &t)))
+                    writeAchievementGet(fd, name, ach ? 1 : 0, t);
+	            else
+                    writeAchievementGet(fd, name, -1, 0);
+            } // if
+            break;
+
+        case SHIMCMD_RESETSTATS:
+            if (buflen)
+            {
+                const bool alsoAch = (*(buf++) != 0);
+                writeResetStats(fd, alsoAch, (GSteamStats) && (GSteamStats->ResetAllStats(alsoAch)));
+            } // if
+            break;
+
+        case SHIMCMD_SETSTATI:
+            if (buflen >= 5)
+            {
+                const int32 val = *((int32 *) buf);
+                buf += sizeof (int32);
+                const char *name = (const char *) buf;   // !!! FIXME: buffer overflow possible.
+                writeSetStatI(fd, name, val, (GSteamStats) && (GSteamStats->SetStat(name, val)));
+            } // if
+            break;
+
+        case SHIMCMD_GETSTATI:
+            if (buflen)
+            {
+                const char *name = (const char *) buf;   // !!! FIXME: buffer overflow possible.
+                int32 val = 0;
+                if ((GSteamStats) && (GSteamStats->GetStat(name, &val)))
+                    writeGetStatI(fd, name, true, val);
+                else
+                    writeGetStatI(fd, name, false, 0);
+            } // if
+            break;
+
+        case SHIMCMD_SETSTATF:
+            if (buflen >= 5)
+            {
+                const float val = *((float *) buf);
+                buf += sizeof (float);
+                const char *name = (const char *) buf;   // !!! FIXME: buffer overflow possible.
+                writeSetStatF(fd, name, val, (GSteamStats) && (GSteamStats->SetStat(name, val)));
+            } // if
+            break;
+
+        case SHIMCMD_GETSTATF:
+            if (buflen)
+            {
+                const char *name = (const char *) buf;   // !!! FIXME: buffer overflow possible.
+                float val = 0;
+                if ((GSteamStats) && (GSteamStats->GetStat(name, &val)))
+                    writeGetStatF(fd, name, val, true);
+                else
+                    writeGetStatF(fd, name, 0.0f, false);
+            } // if
+            break;
     } // switch
+
+    return true;  // keep going.
 } // processCommand
 
 static void processCommands(PipeType pipeParentRead, PipeType pipeParentWrite)
 {
-    char buf[128];
-    ssize_t br;
+    bool quit = false;
+    uint8 buf[256];
+    int br;
 
-    // read() blocks.
-    while ((br = readPipe(pipeParentRead, buf, sizeof (buf))) > 0)
-        processCommand(buf, (unsigned int) br, pipeParentWrite);
+    // this read blocks.
+    while (!quit && ((br = readPipe(pipeParentRead, buf, sizeof (buf))) > 0))
+    {
+        while (br > 0)
+        {
+            const int cmdlen = (int) buf[0];
+            if ((br-1) >= cmdlen)
+            {
+                if (!processCommand(buf+1, cmdlen, pipeParentWrite))
+                {
+                    quit = true;
+                    break;
+                } // if
+
+                br -= cmdlen + 1;
+                memmove(buf, buf+cmdlen+1, br);
+            } // if
+            else  // get rest of this partial command.
+            {
+                const int morebr = readPipe(pipeParentRead, buf+br, cmdlen-(br-1));
+                if (morebr <= 0)
+                {
+                    quit = true;  // uhoh.
+                    break;
+                } // if
+                br += morebr;
+            } // else
+        } // while
+    } // while
 } // processCommands
 
 static bool setEnvironmentVars(PipeType pipeChildRead, PipeType pipeChildWrite)
@@ -266,17 +559,31 @@ static bool setEnvironmentVars(PipeType pipeChildRead, PipeType pipeChildWrite)
     return true;
 } // setEnvironmentVars
 
-static bool initSteamworks(void)
+static bool initSteamworks(PipeType fd)
 {
     if (!SteamAPI_Init())
         return 0;
 
-    GStats = SteamUserStats();
-    if (GStats)
-        GStats->RequestCurrentStats();
+    GSteamStats = SteamUserStats();
+    GSteamUtils = SteamUtils();
+    GSteamUser = SteamUser();
+
+    GAppID = GSteamUtils ? GSteamUtils->GetAppID() : 0;
+	GUserID = GSteamUser ? GSteamUser->GetSteamID().ConvertToUint64() : 0;
+    GSteamBridge = new SteamBridge(fd);
 
     return 1;
 } // initSteamworks
+
+static void deinitSteamworks(void)
+{
+    SteamAPI_Shutdown();
+    delete GSteamBridge;
+    GSteamBridge = NULL;
+    GSteamStats = NULL;
+    GSteamUtils= NULL;
+    GSteamUser = NULL;
+} // deinitSteamworks
 
 static int mainline(void)
 {
@@ -286,10 +593,10 @@ static int mainline(void)
     PipeType pipeChildWrite = NULLPIPE;
     ProcessType childPid;
 
-    if (!initSteamworks())
-        fail("Failed to initialize Steamworks");
-    else if (!createPipes(&pipeParentRead, &pipeParentWrite, &pipeChildRead, &pipeChildWrite))
+    if (!createPipes(&pipeParentRead, &pipeParentWrite, &pipeChildRead, &pipeChildWrite))
         fail("Failed to create application pipes");
+    else if (!initSteamworks(pipeParentWrite))
+        fail("Failed to initialize Steamworks");
     else if (!setEnvironmentVars(pipeChildRead, pipeChildWrite))
         fail("Failed to set environment variables");
     else if (!launchChild(&childPid))
@@ -307,6 +614,8 @@ static int mainline(void)
     // Close our ends of the pipes.
     closePipe(pipeParentRead);
     closePipe(pipeParentWrite);
+
+    deinitSteamworks();
 
     // Wait for the child to terminate, close the child process handles.
     return closeProcess(&childPid);
