@@ -7,8 +7,6 @@ bridge.
 
 What would I ever need this for?
 
-There are two good reasons to use this piece of code:
-
 - You have a GPL-licensed game and can't link directly against the Steamworks
 SDK. The child process links against the simple, open source C code, which
 talks to the open source C++ code via a pipe, which talks to Steamworks. You
