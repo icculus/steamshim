@@ -14,11 +14,6 @@ SDK. The child process links against the simple, open source C code, which
 talks to the open source C++ code via a pipe, which talks to Steamworks. You
 can now add Steam achievements to your game without violating the GPL.
 
-- You have a game written in a programming language that can't interact with
-C++ directly, so you can't make use of the Steamworks SDK directly. If your
-language can link to C-callable code, you can use this to wire up to
-Steamworks.
-
 
 How does it work?
 
