@@ -1,6 +1,6 @@
 What is this?
 
-This is a small piece of code, written in C++, that acts as a bridge between
+- This is a small piece of code, written in C++, that acts as a bridge between
 a child process and the Steamworks SDK. The child process links against a
 small piece of code, written in C, to facilitate communication with the
 bridge.
@@ -21,6 +21,9 @@ Steamworks.
 
 
 How does it work?
+
+- You get a copy of the Steamworks SDK, and link steamshim_parent.cpp against
+it. You ship that program and the steam_api.dll (or whatever) with your game.
 
 - The parent process (the C++ code) gets launched as if it were your game. It
 initializes Steamworks, creates some pipes and launches your actual game, then
@@ -49,9 +52,15 @@ Is this all of Steamworks?
 but it can definitely be extended to offer more things. Take a look at
 
 
+How do I get the Steamworks SDK?
+
+- Go to https://partner.steamgames.com/ and login with your Steam account. You
+can agree to some terms and then download the SDK.
+
+
 Is there an example?
 
-That would be testapp.c. This example expects you to own Postal 1 on Steam and
+- That would be testapp.c. This example expects you to own Postal 1 on Steam and
 will RESET ALL YOUR ACHIEVEMENTS, so be careful running it. But hey, if you
 lose your work, it's a good exercise in SteamShim usage to put them back
 again.  :)
