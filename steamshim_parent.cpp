@@ -589,6 +589,10 @@ static bool setEnvironmentVars(PipeType pipeChildRead, PipeType pipeChildWrite)
 
 static bool initSteamworks(PipeType fd)
 {
+    // this can fail for many reasons:
+    //  - you forgot a steam_appid.txt in the current working directory.
+    //  - you don't have Steam running
+    //  - you don't own the game listed in steam_appid.txt
     if (!SteamAPI_Init())
         return 0;
 
