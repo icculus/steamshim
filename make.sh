@@ -25,5 +25,22 @@ else
     exit 1
 fi
 
+set +e
+set +x
+echo ""
+echo ""
+echo ""
+echo "HEY, PAY ATTENTION."
+echo ""
+echo "By default, this test app will RESET ALL YOUR ACHIEVEMENTS in Postal 1,"
+echo " assuming you own that game on Steam. If you don't own that game on"
+echo " Steam, this test app won't work. Please plan accordingly."
+echo ""
+echo ""
+echo ""
+echo 'You can run "steamshim" now, which will launch "testapp" by default and'
+echo 'NUKE ALL YOUR ACHIEVEMENTS in Postal 1. Seriously, watch out.'
+echo ""
+
 exit 0
 
