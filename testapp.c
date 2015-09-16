@@ -80,7 +80,7 @@ int main(int argc, char **argv)
 
     STEAMSHIM_deinit();
 
-    sleep(10);
+    sleep(3);
 
     printf("Child returning %d\n", retval);
     return retval;
