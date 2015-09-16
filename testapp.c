@@ -1,3 +1,10 @@
+// This example assumes you own Postal 1 on Steam...
+//
+//     http://store.steampowered.com/app/232770
+//
+//  ...and it will RESET ALL YOUR ACHIEVEMENTS for that game, so BE CAREFUL
+//  before running this!
+
 #include "steamshim_child.h"
 #include <stdio.h>
 #include <stdlib.h>
